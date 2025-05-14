@@ -17,8 +17,8 @@
 #include <sbi_utils/serial/uart8250.h>
 #include <sbi_utils/timer/aclint_mtimer.h>
 
-#define ARIANE_UART_ADDR			0x10000000
-#define ARIANE_UART_FREQ			50000000
+#define ARIANE_UART_ADDR			0x30000000
+#define ARIANE_UART_FREQ			100000000
 #define ARIANE_UART_BAUDRATE			115200
 #define ARIANE_UART_REG_SHIFT			2
 #define ARIANE_UART_REG_WIDTH			4
