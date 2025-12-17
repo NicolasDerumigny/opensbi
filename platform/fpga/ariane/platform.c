@@ -18,7 +18,9 @@
 #include <sbi_utils/timer/aclint_mtimer.h>
 
 #define ARIANE_UART_ADDR			0x10000000
-#define ARIANE_UART_FREQ			50000000
+#ifndef ARIANE_UART_FREQ
+#	define ARIANE_UART_FREQ			50000000
+#endif
 #define ARIANE_UART_BAUDRATE			115200
 #define ARIANE_UART_REG_SHIFT			2
 #define ARIANE_UART_REG_WIDTH			4
@@ -43,6 +45,9 @@ static struct plic_data plic = {
 	.flags = PLIC_FLAG_ARIANE_BUG,
 	.context_map = {
 		[0] = { 0, 1 },
+#ifdef ARIANE_DUALCORE
+		[1] = { 3, 4 },
+#endif
 	},
 };
 

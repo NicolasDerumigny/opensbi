@@ -40,3 +40,11 @@ else
 endif
 FW_PAYLOAD_FDT_ADDR=0x82200000
 FW_PAYLOAD_ALIGN=0x1000
+
+ifeq ($(ARIANE_DUALCORE),y)
+  platform-cflags-y += -DARIANE_DUALCORE=y
+endif
+
+ifneq ($(ARIANE_UART_FREQ),)
+  platform-cflags-y += -DARIANE_UART_FREQ=$(ARIANE_UART_FREQ)
+endif
