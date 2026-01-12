@@ -30,9 +30,9 @@ _start:
 	/* Pick one hart to run the main boot sequence */
 	lla	a3, _hart_lottery
 	li	a2, 1
-#ifdef __riscv_atomic
+#if defined(__riscv_atomic) || defined(__riscv_zaamo)
 	amoadd.w a3, a2, (a3)
-#elif __riscv_zalrsc
+#elif defined(__riscv_zalrsc)
 _sc_fail:
 	lr.w	t0, (a3)
 	addw	t1, t0, a2
@@ -97,3 +97,18 @@ _boot_a0:
 	RISCV_PTR	0
 _boot_a1:
 	RISCV_PTR	0
+
+	/* This will be called when the stack corruption is detected */
+	.section .text
+	.align 3
+	.globl __stack_chk_fail
+	.type __stack_chk_fail, %function
+	.equ  __stack_chk_fail, _start_hang
+
+	/* Initial value of the stack guard variable */
+	.section .data
+	.align 3
+	.globl __stack_chk_guard
+	.type __stack_chk_guard, %object
+__stack_chk_guard:
+	RISCV_PTR	0x95B5FF5A

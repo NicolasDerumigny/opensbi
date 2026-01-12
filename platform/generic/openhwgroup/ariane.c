@@ -4,28 +4,13 @@
  *				Panagiotis Peristerakis <perister@ics.forth.gr>
  */
 
-#include <sbi/riscv_asm.h>
-#include <sbi/riscv_encoding.h>
-#include <sbi/riscv_io.h>
-#include <sbi/sbi_const.h>
-#include <sbi/sbi_hart.h>
-#include <sbi/sbi_platform.h>
+#include <platform_override.h>
 #include <sbi_utils/fdt/fdt_helper.h>
 #include <sbi_utils/fdt/fdt_fixup.h>
 #include <sbi_utils/ipi/aclint_mswi.h>
 #include <sbi_utils/irqchip/plic.h>
-#include <sbi_utils/serial/uart8250.h>
 #include <sbi_utils/timer/aclint_mtimer.h>
 
-#define ARIANE_UART_ADDR			0x10000000
-#ifndef ARIANE_UART_FREQ
-#	define ARIANE_UART_FREQ			50000000
-#endif
-#define ARIANE_UART_BAUDRATE			115200
-#define ARIANE_UART_REG_SHIFT			2
-#define ARIANE_UART_REG_WIDTH			4
-#define ARIANE_UART_REG_OFFSET			0
-#define ARIANE_UART_CAPS			0
 #define ARIANE_PLIC_ADDR			0xc000000
 #define ARIANE_PLIC_SIZE			(0x200000 + \
 						 (ARIANE_HART_COUNT * 0x1000))
@@ -80,16 +65,39 @@ static struct aclint_mtimer_data mtimer = {
  */
 static int ariane_early_init(bool cold_boot)
 {
+	const void *fdt;
+	struct plic_data plic_data = plic;
+	unsigned long aclint_freq;
+	uint64_t clint_addr;
+	int rc;
+
 	if (!cold_boot)
 		return 0;
 
-	return uart8250_init(ARIANE_UART_ADDR,
-			     ARIANE_UART_FREQ,
-			     ARIANE_UART_BAUDRATE,
-			     ARIANE_UART_REG_SHIFT,
-			     ARIANE_UART_REG_WIDTH,
-			     ARIANE_UART_REG_OFFSET,
-			     ARIANE_UART_CAPS);
+	rc = generic_early_init(cold_boot);
+	if (rc)
+		return rc;
+
+	fdt = fdt_get_address();
+
+	rc = fdt_parse_timebase_frequency(fdt, &aclint_freq);
+	if (!rc)
+		mtimer.mtime_freq = aclint_freq;
+
+	rc = fdt_parse_compat_addr(fdt, &clint_addr, "riscv,clint0");
+	if (!rc) {
+		mswi.addr = clint_addr;
+		mtimer.mtime_addr = clint_addr + CLINT_MTIMER_OFFSET +
+				    ACLINT_DEFAULT_MTIME_OFFSET;
+		mtimer.mtimecmp_addr = clint_addr + CLINT_MTIMER_OFFSET +
+				       ACLINT_DEFAULT_MTIMECMP_OFFSET;
+	}
+
+	rc = fdt_parse_plic(fdt, &plic_data, "riscv,plic0");
+	if (!rc)
+		plic = plic_data;
+
+	return aclint_mswi_cold_init(&mswi);
 }
 
 /*
@@ -117,14 +125,6 @@ static int ariane_irqchip_init(void)
 }
 
 /*
- * Initialize IPI during cold boot.
- */
-static int ariane_ipi_init(void)
-{
-	return aclint_mswi_cold_init(&mswi);
-}
-
-/*
  * Initialize ariane timer during cold boot.
  */
 static int ariane_timer_init(void)
@@ -132,24 +132,22 @@ static int ariane_timer_init(void)
 	return aclint_mtimer_cold_init(&mtimer, NULL);
 }
 
-/*
- * Platform descriptor.
- */
-const struct sbi_platform_operations platform_ops = {
-	.early_init = ariane_early_init,
-	.final_init = ariane_final_init,
-	.irqchip_init = ariane_irqchip_init,
-	.ipi_init = ariane_ipi_init,
-	.timer_init = ariane_timer_init,
+static int openhwgroup_ariane_platform_init(const void *fdt, int nodeoff, const struct fdt_match *match)
+{
+	generic_platform_ops.early_init = ariane_early_init;
+	generic_platform_ops.timer_init = ariane_timer_init;
+	generic_platform_ops.irqchip_init = ariane_irqchip_init;
+	generic_platform_ops.final_init = ariane_final_init;
+
+	return 0;
+}
+
+static const struct fdt_match openhwgroup_ariane_match[] = {
+	{ .compatible = "eth,ariane-bare-dev" },
+	{ },
 };
 
-const struct sbi_platform platform = {
-	.opensbi_version = OPENSBI_VERSION,
-	.platform_version = SBI_PLATFORM_VERSION(0x0, 0x01),
-	.name = "ARIANE RISC-V",
-	.features = SBI_PLATFORM_DEFAULT_FEATURES,
-	.hart_count = ARIANE_HART_COUNT,
-	.hart_stack_size = SBI_PLATFORM_DEFAULT_HART_STACK_SIZE,
-	.heap_size = SBI_PLATFORM_DEFAULT_HEAP_SIZE(ARIANE_HART_COUNT),
-	.platform_ops_addr = (unsigned long)&platform_ops
+const struct fdt_driver openhwgroup_ariane = {
+	.match_table = openhwgroup_ariane_match,
+	.init = openhwgroup_ariane_platform_init,
 };

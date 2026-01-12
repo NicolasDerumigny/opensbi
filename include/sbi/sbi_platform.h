@@ -76,6 +76,9 @@ struct sbi_platform_operations {
 	/* Check if specified HART is allowed to do cold boot */
 	bool (*cold_boot_allowed)(u32 hartid);
 
+	/* Check if platform requires single firmware region */
+	bool (*single_fw_region)(void);
+
 	/* Platform nascent initialization */
 	int (*nascent_init)(void);
 
@@ -115,9 +118,6 @@ struct sbi_platform_operations {
 
 	/** Initialize the platform interrupt controller during cold boot */
 	int (*irqchip_init)(void);
-
-	/** Initialize IPI during cold boot */
-	int (*ipi_init)(void);
 
 	/** Get tlb flush limit value **/
 	u64 (*get_tlbr_flush_limit)(void);
@@ -351,6 +351,24 @@ static inline bool sbi_platform_cold_boot_allowed(
 }
 
 /**
+ * Check whether platform requires single firmware region
+ *
+ * Note: Single firmware region only works with legacy PMP because with
+ * Smepmp M-mode only regions can't have RWX permissions.
+ *
+ * @param plat pointer to struct sbi_platform
+ *
+ * @return true if single firmware region required and false otherwise
+ */
+static inline bool sbi_platform_single_fw_region(
+					const struct sbi_platform *plat)
+{
+	if (plat && sbi_platform_ops(plat)->single_fw_region)
+		return sbi_platform_ops(plat)->single_fw_region();
+	return false;
+}
+
+/**
  * Nascent (very early) initialization for current HART
  *
  * NOTE: This function can be used to do very early initialization of
@@ -525,20 +543,6 @@ static inline int sbi_platform_irqchip_init(const struct sbi_platform *plat)
 {
 	if (plat && sbi_platform_ops(plat)->irqchip_init)
 		return sbi_platform_ops(plat)->irqchip_init();
-	return 0;
-}
-
-/**
- * Initialize the platform IPI support during cold boot
- *
- * @param plat pointer to struct sbi_platform
- *
- * @return 0 on success and negative error code on failure
- */
-static inline int sbi_platform_ipi_init(const struct sbi_platform *plat)
-{
-	if (plat && sbi_platform_ops(plat)->ipi_init)
-		return sbi_platform_ops(plat)->ipi_init();
 	return 0;
 }
 

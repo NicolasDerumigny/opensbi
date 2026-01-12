@@ -41,3 +41,7 @@ else
   FW_PAYLOAD_OFFSET=0x200000
 endif
 FW_PAYLOAD_FDT_OFFSET=$(FW_JUMP_FDT_OFFSET)
+
+ifeq ($(ARIANE_DUALCORE),y)
+  platform-cflags-y += -DARIANE_DUALCORE=y
+endif

@@ -17,12 +17,12 @@
 #include <sbi/sbi_string.h>
 #include <sbi/sbi_system.h>
 #include <sbi/sbi_tlb.h>
+#include <sbi_utils/cache/fdt_cmo_helper.h>
 #include <sbi_utils/fdt/fdt_domain.h>
 #include <sbi_utils/fdt/fdt_driver.h>
 #include <sbi_utils/fdt/fdt_fixup.h>
 #include <sbi_utils/fdt/fdt_helper.h>
 #include <sbi_utils/fdt/fdt_pmu.h>
-#include <sbi_utils/ipi/fdt_ipi.h>
 #include <sbi_utils/irqchip/fdt_irqchip.h>
 #include <sbi_utils/irqchip/imsic.h>
 #include <sbi_utils/mpxy/fdt_mpxy.h>
@@ -231,7 +231,7 @@ int generic_early_init(bool cold_boot)
 		fdt_driver_init_all(fdt, fdt_early_drivers);
 	}
 
-	return 0;
+	return fdt_cmo_init(cold_boot);
 }
 
 int generic_final_init(bool cold_boot)
@@ -244,6 +244,11 @@ int generic_final_init(bool cold_boot)
 	fdt_cpu_fixup(fdt);
 	fdt_fixups(fdt);
 	fdt_domain_fixup(fdt);
+
+	/* Set the empty space in FDT based on kconfig option */
+	fdt_pack(fdt);
+	fdt_open_into(fdt, fdt, fdt_totalsize(fdt) +
+		      CONFIG_PLATFORM_GENERIC_FDT_EMPTY_SPACE * 1024);
 
 	return 0;
 }
@@ -335,7 +340,6 @@ struct sbi_platform_operations generic_platform_ops = {
 	.extensions_init	= generic_extensions_init,
 	.domains_init		= generic_domains_init,
 	.irqchip_init		= fdt_irqchip_init,
-	.ipi_init		= fdt_ipi_init,
 	.pmu_init		= generic_pmu_init,
 	.pmu_xlate_to_mhpmevent = generic_pmu_xlate_to_mhpmevent,
 	.get_tlbr_flush_limit	= generic_tlbr_flush_limit,

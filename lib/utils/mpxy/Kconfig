@@ -22,6 +22,18 @@ config FDT_MPXY_RPMI_SYSMSI
 	bool "MPXY driver for RPMI system MSI service group"
 	default n
 
+config FDT_MPXY_RPMI_VOLTAGE
+	bool "MPXY driver for RPMI voltage service group"
+	default n
+
+config FDT_MPXY_RPMI_DEVICE_POWER
+	bool "MPXY driver for RPMI device power service group"
+	default n
+
+config FDT_MPXY_RPMI_PERFORMANCE
+	bool "MPXY driver for RPMI performance service group"
+	default n
+
 endif
 
 endmenu

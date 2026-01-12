@@ -16,6 +16,7 @@
 #include <sbi/sbi_trap.h>
 #include <sbi/sbi_dbtr.h>
 #include <sbi/sbi_heap.h>
+#include <sbi/sbi_hart_protection.h>
 #include <sbi/riscv_encoding.h>
 #include <sbi/riscv_asm.h>
 
@@ -336,6 +337,19 @@ static void dbtr_trigger_setup(struct sbi_dbtr_trigger *trig,
 		if (__test_bit(RV_DBTR_BIT(MC6, VS), &tdata1))
 			__set_bit(RV_DBTR_BIT(TS, VS), &trig->state);
 		break;
+	case RISCV_DBTR_TRIG_ICOUNT:
+		if (__test_bit(RV_DBTR_BIT(ICOUNT, U), &tdata1))
+			__set_bit(RV_DBTR_BIT(TS, U), &trig->state);
+
+		if (__test_bit(RV_DBTR_BIT(ICOUNT, S), &tdata1))
+			__set_bit(RV_DBTR_BIT(TS, S), &trig->state);
+
+		if (__test_bit(RV_DBTR_BIT(ICOUNT, VU), &tdata1))
+			__set_bit(RV_DBTR_BIT(TS, VU), &trig->state);
+
+		if (__test_bit(RV_DBTR_BIT(ICOUNT, VS), &tdata1))
+			__set_bit(RV_DBTR_BIT(TS, VS), &trig->state);
+		break;
 	default:
 		sbi_dprintf("%s: Unknown type (tdata1: 0x%lx Type: %ld)\n",
 			    __func__, tdata1, TDATA1_GET_TYPE(tdata1));
@@ -379,6 +393,16 @@ static void dbtr_trigger_enable(struct sbi_dbtr_trigger *trig)
 		update_bit(state & RV_DBTR_BIT_MASK(TS, S),
 			   RV_DBTR_BIT(MC6, S), &trig->tdata1);
 		break;
+	case RISCV_DBTR_TRIG_ICOUNT:
+		update_bit(state & RV_DBTR_BIT_MASK(TS, VU),
+			   RV_DBTR_BIT(ICOUNT, VU), &trig->tdata1);
+		update_bit(state & RV_DBTR_BIT_MASK(TS, VS),
+			   RV_DBTR_BIT(ICOUNT, VS), &trig->tdata1);
+		update_bit(state & RV_DBTR_BIT_MASK(TS, U),
+			   RV_DBTR_BIT(ICOUNT, U), &trig->tdata1);
+		update_bit(state & RV_DBTR_BIT_MASK(TS, S),
+			   RV_DBTR_BIT(ICOUNT, S), &trig->tdata1);
+		break;
 	default:
 		break;
 	}
@@ -418,6 +442,12 @@ static void dbtr_trigger_disable(struct sbi_dbtr_trigger *trig)
 		__clear_bit(RV_DBTR_BIT(MC6, U), &trig->tdata1);
 		__clear_bit(RV_DBTR_BIT(MC6, S), &trig->tdata1);
 		break;
+	case RISCV_DBTR_TRIG_ICOUNT:
+		__clear_bit(RV_DBTR_BIT(ICOUNT, VU), &trig->tdata1);
+		__clear_bit(RV_DBTR_BIT(ICOUNT, VS), &trig->tdata1);
+		__clear_bit(RV_DBTR_BIT(ICOUNT, U), &trig->tdata1);
+		__clear_bit(RV_DBTR_BIT(ICOUNT, S), &trig->tdata1);
+		break;
 	default:
 		break;
 	}
@@ -441,6 +471,7 @@ static int dbtr_trigger_supported(unsigned long type)
 	switch (type) {
 	case RISCV_DBTR_TRIG_MCONTROL:
 	case RISCV_DBTR_TRIG_MCONTROL6:
+	case RISCV_DBTR_TRIG_ICOUNT:
 		return 1;
 	default:
 		break;
@@ -460,6 +491,11 @@ static int dbtr_trigger_valid(unsigned long type, unsigned long tdata)
 	case RISCV_DBTR_TRIG_MCONTROL6:
 		if (!(tdata & RV_DBTR_BIT_MASK(MC6, DMODE)) &&
 		    !(tdata & RV_DBTR_BIT_MASK(MC6, M)))
+			return 1;
+		break;
+	case RISCV_DBTR_TRIG_ICOUNT:
+		if (!(tdata & RV_DBTR_BIT_MASK(ICOUNT, DMODE)) &&
+		    !(tdata & RV_DBTR_BIT_MASK(ICOUNT, M)))
 			return 1;
 		break;
 	default:
@@ -523,17 +559,22 @@ int sbi_dbtr_read_trig(unsigned long smode,
 
 	shmem_base = hart_shmem_base(hs);
 
-	sbi_hart_map_saddr((unsigned long)shmem_base,
-			   trig_count * sizeof(*entry));
+	sbi_hart_protection_map_range((unsigned long)shmem_base,
+				      trig_count * sizeof(*entry));
 	for_each_trig_entry(shmem_base, trig_count, typeof(*entry), entry) {
 		xmit = &entry->data;
 		trig = INDEX_TO_TRIGGER((_idx + trig_idx_base));
+		csr_write(CSR_TSELECT, trig->index);
+		trig->tdata1 = csr_read(CSR_TDATA1);
+		trig->tdata2 = csr_read(CSR_TDATA2);
+		trig->tdata3 = csr_read(CSR_TDATA3);
 		xmit->tstate = cpu_to_lle(trig->state);
 		xmit->tdata1 = cpu_to_lle(trig->tdata1);
 		xmit->tdata2 = cpu_to_lle(trig->tdata2);
 		xmit->tdata3 = cpu_to_lle(trig->tdata3);
 	}
-	sbi_hart_unmap_saddr();
+	sbi_hart_protection_unmap_range((unsigned long)shmem_base,
+					trig_count * sizeof(*entry));
 
 	return SBI_SUCCESS;
 }
@@ -557,8 +598,8 @@ int sbi_dbtr_install_trig(unsigned long smode,
 		return SBI_ERR_NO_SHMEM;
 
 	shmem_base = hart_shmem_base(hs);
-	sbi_hart_map_saddr((unsigned long)shmem_base,
-			   trig_count * sizeof(*entry));
+	sbi_hart_protection_map_range((unsigned long)shmem_base,
+				      trig_count * sizeof(*entry));
 
 	/* Check requested triggers configuration */
 	for_each_trig_entry(shmem_base, trig_count, typeof(*entry), entry) {
@@ -567,20 +608,23 @@ int sbi_dbtr_install_trig(unsigned long smode,
 
 		if (!dbtr_trigger_supported(TDATA1_GET_TYPE(ctrl))) {
 			*out = _idx;
-			sbi_hart_unmap_saddr();
+			sbi_hart_protection_unmap_range((unsigned long)shmem_base,
+							trig_count * sizeof(*entry));
 			return SBI_ERR_FAILED;
 		}
 
 		if (!dbtr_trigger_valid(TDATA1_GET_TYPE(ctrl), ctrl)) {
 			*out = _idx;
-			sbi_hart_unmap_saddr();
+			sbi_hart_protection_unmap_range((unsigned long)shmem_base,
+							trig_count * sizeof(*entry));
 			return SBI_ERR_FAILED;
 		}
 	}
 
 	if (hs->available_trigs < trig_count) {
 		*out = hs->available_trigs;
-		sbi_hart_unmap_saddr();
+		sbi_hart_protection_unmap_range((unsigned long)shmem_base,
+					       trig_count * sizeof(*entry));
 		return SBI_ERR_FAILED;
 	}
 
@@ -600,7 +644,9 @@ int sbi_dbtr_install_trig(unsigned long smode,
 		xmit->idx = cpu_to_lle(trig->index);
 
 	}
-	sbi_hart_unmap_saddr();
+
+	sbi_hart_protection_unmap_range((unsigned long)shmem_base,
+					trig_count * sizeof(*entry));
 
 	return SBI_SUCCESS;
 }
@@ -673,23 +719,23 @@ int sbi_dbtr_update_trig(unsigned long smode,
 		return SBI_ERR_BAD_RANGE;
 
 	for_each_trig_entry(shmem_base, trig_count, typeof(*entry), entry) {
-		sbi_hart_map_saddr((unsigned long)entry, sizeof(*entry));
+		sbi_hart_protection_map_range((unsigned long)entry, sizeof(*entry));
 		trig_idx = entry->id.idx;
 
 		if (trig_idx >= hs->total_trigs) {
-			sbi_hart_unmap_saddr();
+			sbi_hart_protection_unmap_range((unsigned long)entry, sizeof(*entry));
 			return SBI_ERR_INVALID_PARAM;
 		}
 
 		trig = INDEX_TO_TRIGGER(trig_idx);
 
 		if (!(trig->state & RV_DBTR_BIT_MASK(TS, MAPPED))) {
-			sbi_hart_unmap_saddr();
+			sbi_hart_protection_unmap_range((unsigned long)entry, sizeof(*entry));
 			return SBI_ERR_FAILED;
 		}
 
 		dbtr_trigger_setup(trig, &entry->data);
-		sbi_hart_unmap_saddr();
+		sbi_hart_protection_unmap_range((unsigned long)entry, sizeof(*entry));
 		dbtr_trigger_enable(trig);
 	}
 

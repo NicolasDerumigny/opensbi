@@ -47,10 +47,8 @@ struct sbi_hsm_data {
 	unsigned long saved_mie;
 	unsigned long saved_mip;
 	unsigned long saved_medeleg;
-	unsigned long saved_menvcfg;
-#if __riscv_xlen == 32
-	unsigned long saved_menvcfgh;
-#endif
+	unsigned long saved_mideleg;
+	u64 saved_menvcfg;
 	atomic_t start_ticket;
 };
 
@@ -366,7 +364,7 @@ int sbi_hsm_hart_start(struct sbi_scratch *scratch,
 	   (hsm_device_has_hart_secondary_boot() && !init_count)) {
 		rc = hsm_device_hart_start(hartid, scratch->warmboot_addr);
 	} else {
-		rc = sbi_ipi_raw_send(hartindex);
+		rc = sbi_ipi_raw_send(hartindex, true);
 	}
 
 	if (!rc)
@@ -429,12 +427,9 @@ void __sbi_hsm_suspend_non_ret_save(struct sbi_scratch *scratch)
 	hdata->saved_mie = csr_read(CSR_MIE);
 	hdata->saved_mip = csr_read(CSR_MIP) & (MIP_SSIP | MIP_STIP);
 	hdata->saved_medeleg = csr_read(CSR_MEDELEG);
-	if (sbi_hart_priv_version(scratch) >= SBI_HART_PRIV_VER_1_12) {
-#if __riscv_xlen == 32
-		hdata->saved_menvcfgh = csr_read(CSR_MENVCFGH);
-#endif
-		hdata->saved_menvcfg = csr_read(CSR_MENVCFG);
-	}
+	hdata->saved_mideleg = csr_read(CSR_MIDELEG);
+	if (sbi_hart_priv_version(scratch) >= SBI_HART_PRIV_VER_1_12)
+		hdata->saved_menvcfg = csr_read64(CSR_MENVCFG);
 }
 
 static void __sbi_hsm_suspend_non_ret_restore(struct sbi_scratch *scratch)
@@ -442,12 +437,9 @@ static void __sbi_hsm_suspend_non_ret_restore(struct sbi_scratch *scratch)
 	struct sbi_hsm_data *hdata = sbi_scratch_offset_ptr(scratch,
 							    hart_data_offset);
 
-	if (sbi_hart_priv_version(scratch) >= SBI_HART_PRIV_VER_1_12) {
-		csr_write(CSR_MENVCFG, hdata->saved_menvcfg);
-#if __riscv_xlen == 32
-		csr_write(CSR_MENVCFGH, hdata->saved_menvcfgh);
-#endif
-	}
+	if (sbi_hart_priv_version(scratch) >= SBI_HART_PRIV_VER_1_12)
+		csr_write64(CSR_MENVCFG, hdata->saved_menvcfg);
+	csr_write(CSR_MIDELEG, hdata->saved_mideleg);
 	csr_write(CSR_MEDELEG, hdata->saved_medeleg);
 	csr_write(CSR_MIE, hdata->saved_mie);
 	csr_set(CSR_MIP, (hdata->saved_mip & (MIP_SSIP | MIP_STIP)));
@@ -463,7 +455,10 @@ void sbi_hsm_hart_resume_start(struct sbi_scratch *scratch)
 					 SBI_HSM_STATE_RESUME_PENDING))
 		sbi_hart_hang();
 
-	hsm_device_hart_resume();
+	if (sbi_system_is_suspended())
+		sbi_system_resume();
+	else
+		hsm_device_hart_resume();
 }
 
 void __noreturn sbi_hsm_hart_resume_finish(struct sbi_scratch *scratch,
